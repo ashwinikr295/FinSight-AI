@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  investor-platform:
+    build: .
+    container_name: investor_intelligence_app
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+    volumes:
+      - ./data:/app/data
+    restart: always
