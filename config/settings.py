@@ -13,16 +13,21 @@ DB_PATH = DATA_DIR / "investor_intelligence.db"
 RAW_PDF_DIR.mkdir(parents=True, exist_ok=True)
 MARKDOWN_DIR.mkdir(parents=True, exist_ok=True)
 
-# Azure / OpenAI / Gemini Configuration (Optional)
+# Azure / OpenAI / Gemini / DeepSeek / Pinecone Configuration (Optional)
 AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 AZURE_SEARCH_API_KEY = os.getenv("AZURE_SEARCH_API_KEY", "")
 AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "finsight-index")
 
 # Database Config
 POSTGRES_DB_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
 # App Settings
-USE_LOCAL_FALLBACK = True if not (AZURE_OPENAI_API_KEY or OPENAI_API_KEY or GEMINI_API_KEY) else False
+USE_LOCAL_FALLBACK = True if not (AZURE_OPENAI_API_KEY or OPENAI_API_KEY or GEMINI_API_KEY or DEEPSEEK_API_KEY) else False
+
+

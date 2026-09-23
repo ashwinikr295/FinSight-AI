@@ -355,15 +355,64 @@ function initChatForm() {
                 companyFilter = text.split(" (")[0];
             }
 
-            const res = await fetch("/api/chat", {
+            const res = await fetch("/api/chat/stream", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ query: query, company_name: companyFilter })
             });
-            const data = await res.json();
+
+            if (!res.ok || !res.body) {
+                throw new Error(`Server returned status ${res.status}`);
+            }
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+            let streamMessageObj = null;
+
+            while (true) {
+                let chunk;
+                try {
+                    chunk = await reader.read();
+                } catch (readErr) {
+                    console.warn("Stream read interrupted:", readErr);
+                    break;
+                }
+                const { done, value } = chunk;
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n\n");
+                buffer = lines.pop() || "";
+
+                for (const line of lines) {
+                    if (line.startsWith("data: ")) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            if (data.type === "metadata") {
+                                removeLoadingMessage(loadingMsgId);
+                                streamMessageObj = createStreamingSystemMessage(data.citations);
+                            } else if (data.type === "token") {
+                                if (!streamMessageObj) {
+                                    removeLoadingMessage(loadingMsgId);
+                                    streamMessageObj = createStreamingSystemMessage([]);
+                                }
+                                streamMessageObj.appendToken(data.content);
+                            } else if (data.type === "error") {
+                                if (!streamMessageObj) {
+                                    removeLoadingMessage(loadingMsgId);
+                                    appendSystemMessage(`Error: ${data.content}`, []);
+                                }
+                            }
+                        } catch (e) {
+                            console.error("SSE parse error:", e);
+                        }
+                    }
+                }
+            }
 
             removeLoadingMessage(loadingMsgId);
-            appendSystemMessage(data.answer, data.citations);
+
 
         } catch (err) {
             console.error("Chat error:", err);
@@ -377,10 +426,19 @@ function initChatForm() {
         div.className = "message user-msg";
         div.innerHTML = `
             <div class="avatar"><i class="fa-solid fa-user"></i></div>
-            <div class="msg-body"><p>${text}</p></div>
+            <div class="msg-body"><p>${escapeHtml(text)}</p></div>
         `;
         chatContainer.appendChild(div);
         chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function escapeHtml(text) {
+        return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     function appendLoadingMessage() {
@@ -390,7 +448,7 @@ function initChatForm() {
         div.className = "message system-msg";
         div.innerHTML = `
             <div class="avatar"><i class="fa-solid fa-robot"></i></div>
-            <div class="msg-body"><p><i class="fa-solid fa-spinner fa-spin"></i> Retrieving context chunks & generating grounded response...</p></div>
+            <div class="msg-body"><p><i class="fa-solid fa-spinner fa-spin"></i> Retrieving context passages & streaming response...</p></div>
         `;
         chatContainer.appendChild(div);
         chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -402,7 +460,7 @@ function initChatForm() {
         if (el) el.remove();
     }
 
-    function appendSystemMessage(answer, citations) {
+    function createStreamingSystemMessage(citations) {
         const div = document.createElement("div");
         div.className = "message system-msg";
 
@@ -414,21 +472,45 @@ function initChatForm() {
                     ${citations.map(c => `
                         <div class="citation-badge">
                             <strong>[Source ${c.id}] ${c.company_name} (${c.fiscal_year}) - ${c.section_title}</strong> (Match: ${c.confidence})<br>
-                            <em>"${c.snippet}"</em>
+                            <em>"${escapeHtml(c.snippet)}"</em>
                         </div>
                     `).join('')}
                 </div>
             `;
         }
 
-        div.innerHTML = `
-            <div class="avatar"><i class="fa-solid fa-robot"></i></div>
-            <div class="msg-body">
-                <p>${answer}</p>
-                ${citationsHTML}
-            </div>
-        `;
+        const pEl = document.createElement("p");
+        pEl.className = "stream-text-content";
+
+        const msgBody = document.createElement("div");
+        msgBody.className = "msg-body";
+        msgBody.appendChild(pEl);
+
+        if (citationsHTML) {
+            const citContainer = document.createElement("div");
+            citContainer.innerHTML = citationsHTML;
+            msgBody.appendChild(citContainer.firstElementChild);
+        }
+
+        div.innerHTML = `<div class="avatar"><i class="fa-solid fa-robot"></i></div>`;
+        div.appendChild(msgBody);
+
         chatContainer.appendChild(div);
         chatContainer.scrollTop = chatContainer.scrollHeight;
+
+        return {
+            element: div,
+            textElement: pEl,
+            appendToken: function(token) {
+                pEl.textContent += token;
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        };
+    }
+
+    function appendSystemMessage(answer, citations) {
+        const streamObj = createStreamingSystemMessage(citations);
+        streamObj.appendToken(answer);
     }
 }
+

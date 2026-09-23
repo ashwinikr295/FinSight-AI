@@ -1,15 +1,8 @@
-from typing import Dict, List
+from typing import Dict, List, Generator
 from vectorstore.vector_store import get_vector_store
-from llm.azure_openai import get_llm_response
+from llm.azure_openai import get_llm_response, stream_llm_response
 
-def process_rag_query(query: str, company_name: str = None) -> Dict:
-    """
-    RAG Q&A research pipeline:
-    1. Retrieves top context passages from Vector Store.
-    2. Builds grounded context prompt.
-    3. Runs response generator.
-    4. Returns response with detailed source citations.
-    """
+def _build_rag_prompts(query: str, company_name: str = None):
     vs = get_vector_store()
     retrieved_chunks = vs.search(query, company_name=company_name, top_k=4)
 
@@ -17,7 +10,6 @@ def process_rag_query(query: str, company_name: str = None) -> Dict:
         # Fallback query search across all documents
         retrieved_chunks = vs.search(query, company_name=None, top_k=4)
 
-    # Build context string & citations list
     context_passages = []
     citations = []
 
@@ -48,12 +40,20 @@ def process_rag_query(query: str, company_name: str = None) -> Dict:
         "Highlight financial figures, growth rates, and specific risk drivers whenever applicable."
     )
 
-    user_prompt = f"User Question: {query}\n\nDocument Context:\n{context_str}"
+    user_prompt = f"User Question: {query}\n\nDocument Context:\n{context_str}" if context_passages else query
+    return user_prompt, system_prompt, citations
 
-    if context_passages:
-        answer = get_llm_response(user_prompt, system_prompt=system_prompt)
-    else:
-        answer = get_llm_response(query, system_prompt=system_prompt)
+
+def process_rag_query(query: str, company_name: str = None) -> Dict:
+    """
+    RAG Q&A research pipeline:
+    1. Retrieves top context passages from Vector Store.
+    2. Builds grounded context prompt.
+    3. Runs response generator.
+    4. Returns response with detailed source citations.
+    """
+    user_prompt, system_prompt, citations = _build_rag_prompts(query, company_name)
+    answer = get_llm_response(user_prompt, system_prompt=system_prompt)
 
     return {
         "query": query,
@@ -61,3 +61,30 @@ def process_rag_query(query: str, company_name: str = None) -> Dict:
         "citations": citations,
         "sources_count": len(citations)
     }
+
+
+def process_rag_query_stream(query: str, company_name: str = None) -> Generator[Dict, None, None]:
+    """
+    RAG Q&A research pipeline yielding streaming events (metadata, tokens, done).
+    """
+    user_prompt, system_prompt, citations = _build_rag_prompts(query, company_name)
+    
+    # 1. Yield metadata event with RAG citations
+    yield {
+        "type": "metadata",
+        "citations": citations,
+        "sources_count": len(citations)
+    }
+
+    # 2. Stream LLM text tokens
+    for token in stream_llm_response(user_prompt, system_prompt=system_prompt):
+        yield {
+            "type": "token",
+            "content": token
+        }
+
+    # 3. Yield completion event
+    yield {
+        "type": "done"
+    }
+

@@ -1,12 +1,30 @@
 import os
-from config.settings import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, OPENAI_API_KEY, GEMINI_API_KEY
+import time
+from typing import Generator
+from config.settings import AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, OPENAI_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY
 
 def get_llm_response(prompt: str, system_prompt: str = "You are a senior financial analyst assistant.") -> str:
     """
-    Unified LLM response generator supporting OpenAI / Azure OpenAI / Gemini API, 
+    Unified LLM response generator supporting OpenAI / Azure OpenAI / DeepSeek / Gemini API, 
     with a smart rule-based local financial response fallback for zero-cost operation.
     """
-    # 1. Try OpenAI if API Key present
+    # 1. Try DeepSeek if API Key present
+    if DEEPSEEK_API_KEY:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+            res = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return res.choices[0].message.content
+        except Exception as e:
+            print(f"Notice: DeepSeek API call skipped ({e}). Falling back.")
+
+    # 2. Try OpenAI if API Key present
     if OPENAI_API_KEY:
         try:
             from openai import OpenAI
@@ -22,7 +40,7 @@ def get_llm_response(prompt: str, system_prompt: str = "You are a senior financi
         except Exception as e:
             print(f"Notice: OpenAI API call skipped ({e}). Falling back to local engine.")
 
-    # 2. Try Azure OpenAI if API Key present
+    # 3. Try Azure OpenAI if API Key present
     if AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT:
         try:
             from openai import AzureOpenAI
@@ -42,8 +60,86 @@ def get_llm_response(prompt: str, system_prompt: str = "You are a senior financi
         except Exception as e:
             print(f"Notice: Azure OpenAI call skipped ({e}). Falling back to local engine.")
 
-    # 3. Local Smart Financial Synthesis Engine (Zero Cost)
+    # 4. Local Smart Financial Synthesis Engine (Zero Cost)
     return synthesize_local_response(prompt)
+
+
+def stream_llm_response(prompt: str, system_prompt: str = "You are a senior financial analyst assistant.") -> Generator[str, None, None]:
+    """
+    Unified streaming LLM response generator yielding string tokens.
+    """
+    # 1. Try DeepSeek if API Key present
+    if DEEPSEEK_API_KEY:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+            response_stream = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                stream=True
+            )
+            for chunk in response_stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+            return
+        except Exception as e:
+            print(f"Notice: DeepSeek streaming skipped ({e}). Falling back.")
+
+    # 2. Try OpenAI if API Key present
+    if OPENAI_API_KEY:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            response_stream = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                stream=True
+            )
+            for chunk in response_stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+            return
+        except Exception as e:
+            print(f"Notice: OpenAI streaming skipped ({e}). Falling back to local engine stream.")
+
+    # 3. Try Azure OpenAI if API Key present
+    if AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT:
+        try:
+            from openai import AzureOpenAI
+            client = AzureOpenAI(
+                azure_endpoint=AZURE_OPENAI_ENDPOINT,
+                api_key=AZURE_OPENAI_API_KEY,
+                api_version="2024-02-15-preview"
+            )
+            response_stream = client.chat.completions.create(
+                model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4"),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                stream=True
+            )
+            for chunk in response_stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+            return
+        except Exception as e:
+            print(f"Notice: Azure OpenAI streaming skipped ({e}). Falling back to local engine stream.")
+
+    # 4. Local Smart Financial Synthesis Engine Stream (Zero Cost)
+    full_text = synthesize_local_response(prompt)
+    words = full_text.split(" ")
+    for i, word in enumerate(words):
+        token = word if i == len(words) - 1 else word + " "
+        yield token
+        time.sleep(0.02)
+
 
 
 def synthesize_local_response(prompt: str) -> str:
