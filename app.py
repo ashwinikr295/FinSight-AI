@@ -35,11 +35,15 @@ def startup_event():
         print(f"Sample data seed warning: {e}")
 
 # Mount static and template files
-os.makedirs("static", exist_ok=True)
-os.makedirs("templates", exist_ok=True)
+BASE_PATH = Path(__file__).resolve().parent
+static_dir = BASE_PATH / "static"
+templates_dir = BASE_PATH / "templates"
+os.makedirs(static_dir, exist_ok=True)
+os.makedirs(templates_dir, exist_ok=True)
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+templates = Jinja2Templates(directory=str(templates_dir))
+
 
 # Include Routers
 app.include_router(ingestion_router, prefix="/api", tags=["Ingestion"])
